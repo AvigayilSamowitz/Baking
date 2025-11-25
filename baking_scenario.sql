@@ -1,48 +1,57 @@
 -- Baking business scenario T-SQL implementation
 -- Creates the Orders table, inserts sample data, and generates requested reports.
 
--- Use a dedicated schema for clarity
-IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'baking')
-    EXEC('CREATE SCHEMA baking');
-GO
-
 -- Drop and recreate the table for repeatable runs
-IF OBJECT_ID('baking.Orders', 'U') IS NOT NULL
-    DROP TABLE baking.Orders;
+IF OBJECT_ID('dbo.BakingOrders', 'U') IS NOT NULL
+    DROP TABLE dbo.BakingOrders;
 GO
 
-CREATE TABLE baking.Orders (
-    OrderId         INT IDENTITY(1,1) PRIMARY KEY,
+CREATE TABLE dbo.BakingOrders (
+    OrderId         INT IDENTITY(1,1) CONSTRAINT PK_BakingOrders PRIMARY KEY,
     CustomerName    NVARCHAR(100) NOT NULL,
     Branch          NVARCHAR(50) NOT NULL,
     OrderDate       DATE NOT NULL,
     BaseFlavor      NVARCHAR(100) NOT NULL,
-    ItemType        NVARCHAR(20) NOT NULL CHECK (ItemType IN ('Cake','Cupcake','Cookie')),
+    ItemType        NVARCHAR(20) NOT NULL,
     Topping         NVARCHAR(100) NULL,
-    PictureFlag     BIT NOT NULL DEFAULT 0,
+    PictureFlag     BIT NOT NULL CONSTRAINT DF_BakingOrders_PictureFlag DEFAULT 0,
     Specifics       NVARCHAR(400) NULL,
     Occasion        NVARCHAR(100) NOT NULL,
-    Amount          INT NOT NULL CHECK (
-                        (ItemType = 'Cookie'  AND Amount BETWEEN 24 AND 500) OR
-                        (ItemType = 'Cupcake' AND Amount BETWEEN 12 AND 500) OR
-                        (ItemType = 'Cake'    AND Amount >= 1)
-                    ),
-    PricePerItem AS (
+    Amount          INT NOT NULL,
+    PricePerItem AS CAST(
         CASE ItemType
             WHEN 'Cake' THEN 50
                           + CASE WHEN BaseFlavor = 'Strawberry shortcake' THEN 5 ELSE 0 END
                           + CASE WHEN PictureFlag = 1 THEN 8 ELSE 0 END
             WHEN 'Cupcake' THEN 3
             WHEN 'Cookie'  THEN 3.5 + CASE WHEN PictureFlag = 1 THEN 1.5 ELSE 0 END
-        END
+        END AS DECIMAL(10,2)
     ) PERSISTED,
-    OrderTotal AS (Amount * PricePerItem) PERSISTED,
-    CONSTRAINT CK_Cupcake_No_Pictures CHECK (NOT (ItemType = 'Cupcake' AND PictureFlag = 1))
+    OrderTotal AS CAST(Amount * PricePerItem AS DECIMAL(12,2)) PERSISTED,
+    CONSTRAINT CK_BakingOrders_ItemType CHECK (ItemType IN ('Cake','Cupcake','Cookie')),
+    CONSTRAINT CK_BakingOrders_Branch CHECK (Branch IN ('Lakewood','Brooklyn')),
+    CONSTRAINT CK_BakingOrders_Amount CHECK (
+        (ItemType = 'Cookie'  AND Amount BETWEEN 24 AND 500) OR
+        (ItemType = 'Cupcake' AND Amount BETWEEN 12 AND 500) OR
+        (ItemType = 'Cake'    AND Amount >= 1)
+    ),
+    CONSTRAINT CK_BakingOrders_BaseFlavor CHECK (
+        (ItemType IN ('Cake','Cupcake') AND BaseFlavor IN ('Chocolate','Vanilla','Coconut','Chocolate peanut butter','Banana','Strawberry shortcake'))
+        OR (ItemType = 'Cookie' AND BaseFlavor = 'Sugar')
+    ),
+    CONSTRAINT CK_BakingOrders_Topping CHECK (
+        Topping IS NULL
+        OR Topping IN ('Royal icing','Fondant','Frosting - chocolate','Frosting - caramel','Frosting - strawberry','Frosting - coconut','Frosting - peanut butter','Chocolate','Caramel','Strawberry','Coconut','Peanut butter','Vanilla')
+    ),
+    CONSTRAINT CK_BakingOrders_PictureRules CHECK (
+        (ItemType = 'Cupcake' AND PictureFlag = 0)
+        OR (ItemType IN ('Cake','Cookie'))
+    )
 );
 GO
 
 -- Sample data inserts
-INSERT INTO baking.Orders (CustomerName, Branch, OrderDate, BaseFlavor, ItemType, Topping, PictureFlag, Specifics, Occasion, Amount)
+INSERT INTO dbo.BakingOrders (CustomerName, Branch, OrderDate, BaseFlavor, ItemType, Topping, PictureFlag, Specifics, Occasion, Amount)
 VALUES
 ('Chaim Green', 'Lakewood', '2022-01-04', 'Strawberry shortcake', 'Cake', NULL, 0, 'Please make sure they both look the same', 'Baby', 2),
 ('Rivky Shapiro', 'Lakewood', '2021-07-22', 'Chocolate', 'Cake', 'Caramel', 0, 'Write Happy birthday on cake', 'Birthday', 1),
@@ -76,7 +85,7 @@ SELECT
     ItemType,
     BaseFlavor,
     SUM(Amount) AS TotalQuantity
-FROM baking.Orders
+FROM dbo.BakingOrders
 GROUP BY Branch, ItemType, BaseFlavor
 ORDER BY Branch, ItemType, BaseFlavor;
 GO
@@ -90,7 +99,7 @@ WITH Seasoned AS (
                 WHEN MONTH(OrderDate) BETWEEN 11 AND 12 OR MONTH(OrderDate) BETWEEN 1 AND 4 THEN 'Winter'
                 WHEN MONTH(OrderDate) IN (5,6) THEN 'Spring'
            END AS Season
-    FROM baking.Orders
+    FROM dbo.BakingOrders
 )
 SELECT Season, Occasion AS Event, Branch, COUNT(*) AS Orders
 FROM Seasoned
@@ -103,7 +112,7 @@ SELECT
     Branch,
     DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) AS OrderMonth,
     SUM(OrderTotal) AS Revenue
-FROM baking.Orders
+FROM dbo.BakingOrders
 GROUP BY Branch, DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1)
 ORDER BY Branch, OrderMonth;
 GO
@@ -113,11 +122,11 @@ SELECT
     Branch,
     DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) AS OrderMonth,
     COUNT(*) AS Orders
-FROM baking.Orders
+FROM dbo.BakingOrders
 GROUP BY Branch, DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1)
 ORDER BY Branch, OrderMonth;
 GO
 
 -- Bonus: earliest order date
-SELECT MIN(OrderDate) AS EarliestOrderDate FROM baking.Orders;
+SELECT MIN(OrderDate) AS EarliestOrderDate FROM dbo.BakingOrders;
 GO
